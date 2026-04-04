@@ -1,8 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { GitPullRequest, Moon, Sun } from "lucide-react";
+import { GitPullRequest, LogOut, Moon, Sun, UserCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/hooks/use-store";
-import { updateSettings } from "@/store/app-store";
+import { clearAuth, updateSettings, setAuth } from "@/store/app-store";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import { loginWithGoogle } from "@/lib/api";
+import { toast } from "sonner";
 
 const navItems = [
   { label: "Home", path: "/" },
@@ -12,7 +15,7 @@ const navItems = [
 ];
 
 export function Navbar() {
-  const { settings } = useAppStore();
+  const { settings, user } = useAppStore();
   const location = useLocation();
 
   const toggleTheme = () => {
@@ -45,9 +48,44 @@ export function Navbar() {
           ))}
         </nav>
 
-        <Button variant="ghost" size="icon" onClick={toggleTheme}>
-          {settings.theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
+        <div className="flex items-center gap-2">
+          {user ? (
+            <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5">
+              <UserCircle2 className="h-4 w-4 text-primary" />
+              <span className="max-w-[160px] truncate text-xs font-medium text-foreground">
+                {user.name}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => {
+                  clearAuth();
+                  toast.success("Signed out");
+                }}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <GoogleSignInButton
+              compact
+              onCredential={async (credential) => {
+                try {
+                  const response = await loginWithGoogle(credential);
+                  setAuth(response.user, credential);
+                  toast.success(`Signed in as ${response.user.name}`);
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Failed to sign in");
+                }
+              }}
+            />
+          )}
+
+          <Button variant="ghost" size="icon" onClick={toggleTheme}>
+            {settings.theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
+        </div>
       </div>
     </header>
   );

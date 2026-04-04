@@ -1,18 +1,40 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navbar } from "@/components/Navbar";
-import { useAppStore } from "@/hooks/use-store";
-import { removeFromHistory } from "@/store/app-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChangeTypeBadge } from "@/components/ChangeTypeBadge";
 import { Search, Trash2, ChevronDown, ChevronUp, Inbox } from "lucide-react";
 import { toast } from "sonner";
+import { fetchHistory, deleteHistoryItem } from "@/lib/api";
+import { useAppStore } from "@/hooks/use-store";
+import { PRSummary } from "@/types";
 
 export default function History() {
-  const { history } = useAppStore();
+  const { credential, user } = useAppStore();
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [history, setHistory] = useState<PRSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!credential || !user) {
+      setHistory([]);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    fetchHistory(credential)
+      .then(setHistory)
+      .catch((fetchError) => {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load history");
+        toast.error("Failed to load saved summaries");
+      })
+      .finally(() => setLoading(false));
+  }, [credential, user]);
 
   const filtered = history.filter(
     (s) =>
@@ -36,6 +58,24 @@ export default function History() {
             className="border-border bg-surface pl-10 font-mono text-sm"
           />
         </div>
+
+        {!user && (
+          <div className="mb-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            Sign in with Google to see your persisted PR history.
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-foreground">
+            {error}
+          </div>
+        )}
+
+        {loading && (
+          <div className="mb-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            Loading saved summaries...
+          </div>
+        )}
 
         {filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -71,10 +111,20 @@ export default function History() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        removeFromHistory(item.id);
-                        toast.success("Removed from history");
+                        if (!credential) {
+                          toast.error("Sign in again to delete history items");
+                          return;
+                        }
+
+                        try {
+                          await deleteHistoryItem(credential, item.id);
+                          setHistory((current) => current.filter((summary) => summary.id !== item.id));
+                          toast.success("Removed from history");
+                        } catch (deleteError) {
+                          toast.error(deleteError instanceof Error ? deleteError.message : "Failed to delete item");
+                        }
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />

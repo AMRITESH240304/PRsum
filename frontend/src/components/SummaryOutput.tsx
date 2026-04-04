@@ -3,11 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChangeTypeBadge } from "@/components/ChangeTypeBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FileCode, ListChecks, FileText, GitCommit, BookOpen } from "lucide-react";
+import { FileCode, ListChecks, FileText, GitCommit, BookOpen, GitBranch } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { addToHistory } from "@/store/app-store";
-import { toast } from "sonner";
 
 export function SummaryOutput({ summary }: { summary: PRSummary }) {
   const [checklist, setChecklist] = useState(summary.checklist);
@@ -16,11 +13,6 @@ export function SummaryOutput({ summary }: { summary: PRSummary }) {
     setChecklist((prev) =>
       prev.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item))
     );
-  };
-
-  const handleSave = () => {
-    addToHistory(summary);
-    toast.success("Saved to history");
   };
 
   return (
@@ -90,6 +82,22 @@ export function SummaryOutput({ summary }: { summary: PRSummary }) {
         </CardContent>
       </Card>
 
+      {/* Raw Diff */}
+      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.35s" }}>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Git Diff</CardTitle>
+          </div>
+          <CopyButton text={summary.rawDiff ?? ""} label="Copy Diff" />
+        </CardHeader>
+        <CardContent>
+          <pre className="max-h-[420px] overflow-auto rounded-md bg-surface p-4 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+            {summary.rawDiff || "No diff payload was returned for this summary."}
+          </pre>
+        </CardContent>
+      </Card>
+
       {/* Review Checklist */}
       <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.4s" }}>
         <CardHeader className="flex flex-row items-center gap-2 pb-3">
@@ -121,9 +129,6 @@ export function SummaryOutput({ summary }: { summary: PRSummary }) {
       <div className="flex gap-2 animate-fade-in" style={{ animationDelay: "0.5s" }}>
         <CopyButton text={summary.summary} label="Copy Summary" />
         <CopyButton text={summary.changelog} label="Copy Changelog" />
-        <Button variant="outline" size="sm" onClick={handleSave}>
-          Save to History
-        </Button>
       </div>
     </div>
   );
