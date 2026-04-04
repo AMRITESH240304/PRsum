@@ -4,4 +4,8 @@ from config import settings
 client = MongoClient(settings.MONGODB_URI)
 db = client["pr_db"]
 
-pr_collection = db["pull_requests"]
+users_collection = db["users"]
+history_collection = db["pull_request_summaries"]
+
+# Backwards-compatible alias for the existing code path.
+pr_collection = history_collection

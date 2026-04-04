@@ -1,5 +1,6 @@
 import requests
 import re
+from typing import Any
 from config import settings
 
 
@@ -11,12 +12,21 @@ def parse_pr_url(pr_url: str):
 
 
 def github_get(url: str, headers: dict):
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=30)
 
     if response.status_code != 200:
         raise Exception(f"GitHub API error: {response.status_code} - {response.text}")
 
     return response.json()
+
+
+def github_get_text(url: str, headers: dict):
+    response = requests.get(url, headers=headers, timeout=30)
+
+    if response.status_code != 200:
+        raise Exception(f"GitHub API error: {response.status_code} - {response.text}")
+
+    return response.text
 
 
 def fetch_paginated(url: str, headers: dict):
@@ -61,23 +71,34 @@ def fetch_pr_public(pr_url: str):
 
     reviews = fetch_paginated(f"{base_api}/reviews", headers)
 
+    compare_url = (
+        f"https://api.github.com/repos/{owner}/{repo}/compare/"
+        f"{pr_data['base']['sha']}...{pr_data['head']['sha']}"
+    )
+
+    raw_diff = github_get_text(compare_url, {**headers, "Accept": "application/vnd.github.v3.diff"})
+
+    def build_change(file_payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "filename": file_payload["filename"],
+            "status": file_payload["status"],
+            "additions": file_payload["additions"],
+            "deletions": file_payload["deletions"],
+            "patch": file_payload.get("patch"),
+        }
+
     return {
+        "repo_owner": owner,
+        "repo_name": repo,
         "pr_number": int(pr_number),
         "repo": f"{owner}/{repo}",
         "title": pr_data.get("title"),
         "author": pr_data.get("user", {}).get("login"),
         "state": pr_data.get("state"),
+        "base_branch": pr_data.get("base", {}).get("ref"),
+        "head_branch": pr_data.get("head", {}).get("ref"),
 
-        "files": [
-            {
-                "file": f["filename"],
-                "status": f["status"],
-                "additions": f["additions"],
-                "deletions": f["deletions"],
-                "patch": f.get("patch")
-            }
-            for f in files
-        ],
+        "files": [build_change(f) for f in files],
 
         "comments": [
             {
@@ -104,5 +125,6 @@ def fetch_pr_public(pr_url: str):
                 "body": r["body"]
             }
             for r in reviews
-        ]
+        ],
+        "raw_diff": raw_diff,
     }
