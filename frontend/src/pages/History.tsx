@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { useAppStore } from "@/hooks/use-store";
 import { PRSummary } from "@/types";
 
 export default function History() {
+  const navigate = useNavigate();
   const { credential, user } = useAppStore();
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -94,7 +96,10 @@ export default function History() {
             >
               <CardHeader
                 className="cursor-pointer pb-2"
-                onClick={() => setExpanded(expanded === item.id ? null : item.id)}
+                onClick={() => {
+                  setExpanded(expanded === item.id ? null : item.id);
+                  navigate("/summarize", { state: { summary: item } });
+                }}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">

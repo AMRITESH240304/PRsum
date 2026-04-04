@@ -1,16 +1,38 @@
 export type ChangeType = "feat" | "fix" | "refactor" | "chore";
+export type RiskLevel = "low" | "medium" | "high";
 
 export interface FileChange {
   filename: string;
   changeType: ChangeType;
   additions: number;
   deletions: number;
+  status?: string;
+  patch?: string | null;
 }
 
 export interface ChecklistItem {
   id: string;
   label: string;
   checked: boolean;
+}
+
+export interface PRMetadata {
+  title: string;
+  author: string;
+  number: number;
+  repo: string;
+  branch_from: string;
+  branch_to: string;
+  status: "open" | "merged" | "closed";
+  opened: string;
+  files_changed: number;
+  additions: number;
+  deletions: number;
+}
+
+export interface SummaryInsight {
+  type: "warning" | "insight";
+  text: string;
 }
 
 export interface PRSummary {
@@ -26,6 +48,12 @@ export interface PRSummary {
   changelog: string;
   checklist: ChecklistItem[];
   rawDiff?: string;
+  pr?: PRMetadata;
+  risk?: {
+    level: RiskLevel;
+    reason: string;
+  };
+  insights?: SummaryInsight[];
 }
 
 export interface AppSettings {
@@ -33,6 +61,9 @@ export interface AppSettings {
   githubToken: string;
   includeChangelog: boolean;
   includeChecklist: boolean;
+  includeInsights?: boolean;
+  includeRawDiff?: boolean;
+  tone?: "technical" | "simple" | "detailed";
   theme: "dark" | "light";
 }
 
