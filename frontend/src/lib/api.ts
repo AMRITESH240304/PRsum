@@ -1,6 +1,17 @@
 import { AuthUser, PRSummary } from "@/types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE_URL = (configuredApiBaseUrl
+  ? configuredApiBaseUrl
+  : import.meta.env.PROD
+    ? ""
+    : "http://localhost:8000"
+).replace(/\/+$/, "");
+
+function apiUrl(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
+}
 
 function buildHeaders(credential?: string | null, json = true) {
   const headers: HeadersInit = {};
@@ -14,7 +25,7 @@ function buildHeaders(credential?: string | null, json = true) {
 }
 
 export async function loginWithGoogle(credential: string): Promise<{ user: AuthUser }> {
-  const response = await fetch(`${API_BASE_URL}/auth/google`, {
+  const response = await fetch(apiUrl("/auth/google"), {
     method: "POST",
     headers: buildHeaders(),
     body: JSON.stringify({ credential }),
@@ -29,7 +40,7 @@ export async function loginWithGoogle(credential: string): Promise<{ user: AuthU
 }
 
 export async function fetchHistory(credential: string): Promise<PRSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/history`, {
+  const response = await fetch(apiUrl("/history"), {
     headers: buildHeaders(credential, false),
   });
 
@@ -43,7 +54,7 @@ export async function fetchHistory(credential: string): Promise<PRSummary[]> {
 }
 
 export async function deleteHistoryItem(credential: string, summaryId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/history/${summaryId}`, {
+  const response = await fetch(apiUrl(`/history/${summaryId}`), {
     method: "DELETE",
     headers: buildHeaders(credential, false),
   });
@@ -58,7 +69,7 @@ export async function saveHistorySummary(
   credential: string | undefined,
   summary: PRSummary
 ): Promise<{ id: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/history`, {
+  const response = await fetch(apiUrl("/api/history"), {
     method: "POST",
     headers: buildHeaders(credential ?? null),
     body: JSON.stringify(summary),
@@ -121,7 +132,7 @@ export async function streamSummary(
   const streamEndpoints = ["/api/summarize/stream", "/summarize-pr/stream"];
 
   for (const endpoint of streamEndpoints) {
-    const candidate = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const candidate = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: buildHeaders(credential),
       body: JSON.stringify(payload),

@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+let gsiInitialized = false;
+let activeCredentialHandler: ((credential: string) => void) | null = null;
 
 declare global {
   interface Window {
@@ -28,24 +30,32 @@ export function GoogleSignInButton({
   compact?: boolean;
 }) {
   const buttonRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !buttonRef.current || initializedRef.current) {
+    activeCredentialHandler = onCredential;
+  }, [onCredential]);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || !buttonRef.current) {
       return;
     }
 
     const initializeButton = () => {
-      if (!window.google || !buttonRef.current || initializedRef.current) {
+      if (!window.google || !buttonRef.current) {
         return false;
       }
 
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: (response) => {
-          onCredential(response.credential);
-        },
-      });
+      if (!gsiInitialized) {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            activeCredentialHandler?.(response.credential);
+          },
+        });
+        gsiInitialized = true;
+      }
+
+      buttonRef.current.innerHTML = "";
 
       window.google.accounts.id.renderButton(buttonRef.current, {
         theme: "outline",
@@ -55,7 +65,6 @@ export function GoogleSignInButton({
         text: "signin_with",
       });
 
-      initializedRef.current = true;
       return true;
     };
 
@@ -70,7 +79,7 @@ export function GoogleSignInButton({
     }, 100);
 
     return () => window.clearInterval(interval);
-  }, [compact, onCredential]);
+  }, [compact]);
 
   return (
     <div className="flex items-center gap-2">
