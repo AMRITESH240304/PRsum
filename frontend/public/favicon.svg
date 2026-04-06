@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#00e5cf" />
+      <stop offset="1" stop-color="#00b3a6" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="24" fill="#0a0a0a" />
+  <!-- node icon -->
+  <g transform="translate(28,36)">
+    <circle cx="36" cy="36" r="18" fill="url(#g)" />
+    <circle cx="36" cy="110" r="12" fill="#08c3a9" />
+    <circle cx="110" cy="74" r="12" fill="#08c3a9" />
+    <line x1="36" y1="54" x2="36" y2="98" stroke="#04a88a" stroke-width="6" stroke-linecap="round"/>
+    <line x1="54" y1="44" x2="98" y2="66" stroke="#04a88a" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="36" cy="36" r="3" fill="#001" opacity="0.05" />
+  </g>
+
+  <!-- text PRSum -->
+  <g transform="translate(28,150)">
+    <text x="0" y="0" font-family="DM Sans, Arial, sans-serif" font-weight="700" font-size="48" fill="#ffffff">PR</text>
+    <text x="78" y="0" font-family="DM Sans, Arial, sans-serif" font-weight="700" font-size="48" fill="url(#g)">Sum</text>
+  </g>
+</svg>

@@ -17,27 +17,6 @@ export default function Settings() {
         <h1 className="mb-6 text-2xl font-bold text-foreground">Settings</h1>
 
         <div className="space-y-4">
-          {/* API Keys */}
-          <Card className="border-border bg-card">
-            <CardHeader className="flex flex-row items-center gap-2 pb-3">
-              <KeyRound className="h-4 w-4 text-primary" />
-              <CardTitle className="text-base">API Keys</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="anthropic" className="text-sm">Anthropic API Key</Label>
-                <Input
-                  id="anthropic"
-                  type="password"
-                  value={settings.anthropicKey}
-                  onChange={(e) => updateSettings({ anthropicKey: e.target.value })}
-                  placeholder="sk-ant-..."
-                  className="border-border bg-surface font-mono text-sm"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
           {/* GitHub */}
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-row items-center gap-2 pb-3">
