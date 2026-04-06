@@ -4,6 +4,7 @@ import { ExternalLink, GitBranch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/CopyButton";
+import { InlineDiffComment } from "@/components/InlineDiffComment";
 import { cn } from "@/lib/utils";
 
 type DiffFile = {
@@ -67,9 +68,33 @@ export function DiffViewer({
   animationDelay?: number;
 }) {
   const [activeFile, setActiveFile] = useState(0);
+  const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  const [editingLine, setEditingLine] = useState<number | null>(null);
+  const [annotations, setAnnotations] = useState<Record<string, string>>({});
 
   const active = files[activeFile];
   const parsedLines = useMemo(() => parseDiff(active?.diff ?? ""), [active]);
+
+  const lineKey = (lineIndex: number) => `${active?.filename ?? "unknown"}:${lineIndex}`;
+
+  const getAnnotation = (lineIndex: number) => annotations[lineKey(lineIndex)] ?? "";
+
+  const saveAnnotation = (lineIndex: number, value: string) => {
+    const key = lineKey(lineIndex);
+    setAnnotations((current) => {
+      if (!value) {
+        const clone = { ...current };
+        delete clone[key];
+        return clone;
+      }
+
+      return {
+        ...current,
+        [key]: value,
+      };
+    });
+    setEditingLine(null);
+  };
 
   if (!active || !active.diff) {
     return (
@@ -124,25 +149,54 @@ export function DiffViewer({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="max-h-[420px] overflow-auto rounded-md border border-border bg-[#0e0e0e]">
+        <div className="max-h-[420px] overflow-auto rounded-md border border-border bg-[#0d0d0d]">
           <table className="w-full border-collapse font-mono text-xs">
             <tbody>
               {parsedLines.map((line, index) => (
                 <tr
                   key={`${line.content}-${index}`}
+                  onMouseEnter={() => setHoveredLine(index)}
+                  onMouseLeave={() => setHoveredLine((current) => (current === index ? null : current))}
                   className={cn(
                     line.kind === "add" && "bg-[#003d00]",
                     line.kind === "remove" && "bg-[#3d0000]",
-                    line.kind === "meta" && "bg-[#121212] text-cyan-200"
+                    line.kind === "meta" && "bg-[#001a3d] text-[#4d9fff]",
+                    line.kind === "context" && "bg-[#0d0d0d] text-[#666666]"
                   )}
                 >
-                  <td className="w-10 select-none border-r border-border px-2 text-right text-muted-foreground">
+                  <td className="w-10 select-none border-r border-border px-2 text-right text-[#444444]">
                     {line.oldLine ?? ""}
                   </td>
-                  <td className="w-10 select-none border-r border-border px-2 text-right text-muted-foreground">
+                  <td className="w-10 select-none border-r border-border px-2 text-right text-[#444444]">
                     {line.newLine ?? ""}
                   </td>
-                  <td className="whitespace-pre-wrap px-3 py-1.5 text-foreground">{line.content || " "}</td>
+                  <td className="whitespace-pre-wrap px-3 py-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <span
+                        className={cn(
+                          "break-words",
+                          line.kind === "add" && "text-[#80ff80]",
+                          line.kind === "remove" && "text-[#ff8080]",
+                          line.kind === "context" && "text-[#666666]",
+                          line.kind === "meta" && "text-[#4d9fff]"
+                        )}
+                      >
+                        {line.kind === "add" ? <span className="text-[#00cc44]">+</span> : null}
+                        {line.kind === "remove" ? <span className="text-[#ff4444]">-</span> : null}
+                        {(line.kind === "add" || line.kind === "remove") ? line.content.slice(1) || " " : line.content || " "}
+                      </span>
+
+                      {(line.kind === "add" || line.kind === "remove" || line.kind === "context") && (hoveredLine === index || editingLine === index || getAnnotation(index)) && (
+                        <InlineDiffComment
+                          annotation={getAnnotation(index)}
+                          editing={editingLine === index}
+                          onStart={() => setEditingLine(index)}
+                          onSave={(value) => saveAnnotation(index, value)}
+                          onCancel={() => setEditingLine(null)}
+                        />
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

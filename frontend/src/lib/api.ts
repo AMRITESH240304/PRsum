@@ -54,6 +54,24 @@ export async function deleteHistoryItem(credential: string, summaryId: string): 
   }
 }
 
+export async function saveHistorySummary(
+  credential: string | undefined,
+  summary: PRSummary
+): Promise<{ id: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/history`, {
+    method: "POST",
+    headers: buildHeaders(credential ?? null),
+    body: JSON.stringify(summary),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Failed to save history");
+  }
+
+  return response.json();
+}
+
 export type SummaryStreamPayload = {
   pr_url?: string;
   diff_text?: string;
@@ -99,14 +117,29 @@ export async function streamSummary(
   payload: SummaryStreamPayload,
   handlers: SummaryStreamEventHandlers
 ): Promise<PRSummary | null> {
-  const response = await fetch(`${API_BASE_URL}/summarize-pr/stream`, {
-    method: "POST",
-    headers: buildHeaders(credential),
-    body: JSON.stringify(payload),
-  });
+  let response: Response | null = null;
+  const streamEndpoints = ["/api/summarize/stream", "/summarize-pr/stream"];
 
-  if (!response.ok || !response.body) {
-    const error = await response.json().catch(() => ({}));
+  for (const endpoint of streamEndpoints) {
+    const candidate = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: buildHeaders(credential),
+      body: JSON.stringify(payload),
+    });
+
+    if (candidate.ok && candidate.body) {
+      response = candidate;
+      break;
+    }
+
+    if (candidate.status !== 404) {
+      response = candidate;
+      break;
+    }
+  }
+
+  if (!response || !response.ok || !response.body) {
+    const error = await response?.json().catch(() => ({}));
     throw new Error(error.detail || "Failed to start summarization");
   }
 

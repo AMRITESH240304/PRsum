@@ -3,8 +3,16 @@ import uvicorn
 from router.routes import router
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-app = FastAPI()
+from rate_limiter import limiter
+
+app = FastAPI(version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.frontend_origins,

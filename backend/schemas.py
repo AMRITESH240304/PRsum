@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -63,3 +63,22 @@ class PRSummaryRecord(PRSummaryPayload):
     id: str
     userId: str
     date: str
+
+
+class SummaryArtifact(BaseModel):
+    id: str | None = None
+    repoName: str
+    prNumber: int
+    prTitle: str
+    author: str | None = None
+    date: str | None = None
+    summary: str
+    changes: list[dict[str, Any]] = []
+    filesAffected: list[dict[str, Any]] = []
+    changelog: str = ""
+    checklist: list[dict[str, Any]] = []
+    rawDiff: str = ""
+    risk: dict[str, Any] | None = None
+    insights: list[dict[str, Any]] = []
+    pr: dict[str, Any] | None = None
+    prUrl: str | None = None

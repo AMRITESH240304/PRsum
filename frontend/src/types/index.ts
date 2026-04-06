@@ -1,6 +1,7 @@
 export type ChangeType = "feat" | "fix" | "refactor" | "chore";
 export type RiskLevel = "low" | "medium" | "high";
 export type ChecklistPriority = "critical" | "high" | "medium";
+export type SummaryTone = "technical" | "simple" | "detailed";
 
 export interface FileChange {
   filename: string;
@@ -71,6 +72,7 @@ export interface PRSummary {
   rawDiff?: string;
   pr?: PRMetadata;
   structuredSummary?: StructuredSummary;
+  toneSummaries?: Record<SummaryTone, StructuredSummary>;
   whatChanged?: WhatChangedItem[];
   risk?: {
     level: RiskLevel;
@@ -78,6 +80,7 @@ export interface PRSummary {
   };
   insights?: SummaryInsight[];
   prUrl?: string;
+  healthScore?: number;
 }
 
 export interface AppSettings {
@@ -87,7 +90,7 @@ export interface AppSettings {
   includeChecklist: boolean;
   includeInsights?: boolean;
   includeRawDiff?: boolean;
-  tone?: "technical" | "simple" | "detailed";
+  tone?: SummaryTone;
   theme: "dark" | "light";
 }
 
