@@ -64,16 +64,18 @@ Summarization agent (high level)
   - Emits streaming events (progress / file summaries / final artifact) back to the client.
 - Implementation detail: the agent uses prompt-driven LLM interactions (the codebase contains utilities to normalize prompts, manage streaming responses, and synthesize final artifacts). It is designed for safe fallbacks (non-stream summarize route) and for persisting artifacts to a DB.
 
-Operational notes
------------------
-- The app is designed to be run with the frontend on a dev server and the backend behind uvicorn. In production, run backend behind an ASGI server and serve the built frontend assets.
-- For local testing of streaming, ensure the backend is reachable from the frontend (CORS, correct API_BASE_URL in frontend config).
-- The Settings page now omits a direct API-key text box for security/usability reasons; tokens are stored in the app store for dev convenience but consider secure storage for production.
+OXLO API usage and models
+-------------------------
+This project uses OXLO as the LLM provider. Configure the client via environment settings (used in code as `settings.OXLO_BASE_URL` and `settings.OXLOAPI_KEY`). The summarization pipeline assigns models by task to balance code-awareness and narrative quality:
 
-Where to look next
-------------------
-- Want a docker-compose dev setup? I can add one that runs the frontend, backend, and a Mongo container.
-- Want the README extended with API examples (curl) and OpenAPI docs pointers? I can add short examples.
+- `qwen-3-coder-30b` — used for code-aware tasks where precise parsing or structured output is required (risk analysis, file-level analysis, changelog generation).
+- `gemma-3-27b` — used for broader intent and narrative tasks (intent extraction, final narrative summary, checklist generation).
 
----
-Made succinct for quick onboarding. Tell me if you want this expanded with diagrams, curl examples, or a Docker compose setup.
+Key integration details:
+- The backend builds a set of typed prompt templates (`ChatPromptTemplate`) and invokes OXLO via `ChatOpenAI` clients configured per-task.
+- Temperature is set low (0.2) to favor deterministic, review-friendly outputs; for exploratory runs this can be increased in `summarize_pr.py`.
+- Several outputs are parsed as JSON using `StrOutputParser` and defensive parsing (`_parse_json_output`) to extract structured fields.
+- The orchestration is implemented as a state graph (`StateGraph`) that runs nodes in sequence: diff parsing → risk analysis → intent → per-file analysis → aggregation → summary → changelog → checklist → validation. Nodes emit progress events via the `on_event` callback which the API layer forwards to frontend SSE streams.
+- Inputs are truncated/chunked to avoid overly large prompts: per-file patches are sliced (e.g., 8k chars) and a raw diff excerpt (24k) is included when available.
+- The pipeline includes validation and retry logic: if the narrative is too generic or content is missing, the graph will retry the summary writer up to a limit and falls back to a deterministic short summary generator when needed.
+
