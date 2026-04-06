@@ -1,5 +1,6 @@
 export type ChangeType = "feat" | "fix" | "refactor" | "chore";
 export type RiskLevel = "low" | "medium" | "high";
+export type ChecklistPriority = "critical" | "high" | "medium";
 
 export interface FileChange {
   filename: string;
@@ -8,12 +9,14 @@ export interface FileChange {
   deletions: number;
   status?: string;
   patch?: string | null;
+  summary?: string;
 }
 
 export interface ChecklistItem {
   id: string;
   label: string;
   checked: boolean;
+  priority?: ChecklistPriority;
 }
 
 export interface PRMetadata {
@@ -28,11 +31,29 @@ export interface PRMetadata {
   files_changed: number;
   additions: number;
   deletions: number;
+  description?: string;
 }
 
 export interface SummaryInsight {
-  type: "warning" | "insight";
+  type: "security" | "warning" | "insight" | "positive";
   text: string;
+}
+
+export interface StructuredSummary {
+  what: string;
+  how: string;
+  impact: string;
+}
+
+export interface WhatChangedItem {
+  filename: string;
+  type: ChangeType;
+  additions: number;
+  deletions: number;
+  reliability?: number;
+  what: string;
+  keyChanges: string[];
+  diff?: string;
 }
 
 export interface PRSummary {
@@ -49,11 +70,14 @@ export interface PRSummary {
   checklist: ChecklistItem[];
   rawDiff?: string;
   pr?: PRMetadata;
+  structuredSummary?: StructuredSummary;
+  whatChanged?: WhatChangedItem[];
   risk?: {
     level: RiskLevel;
     reason: string;
   };
   insights?: SummaryInsight[];
+  prUrl?: string;
 }
 
 export interface AppSettings {

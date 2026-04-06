@@ -11,10 +11,9 @@ import { mockDiff } from "@/lib/mock-data";
 import { PRSummary } from "@/types";
 import { streamSummary } from "@/lib/api";
 import { useAppStore } from "@/hooks/use-store";
-import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
-import { Sparkles, Github, FileText, Upload, Terminal, GitCommitHorizontal, ShieldAlert, ChevronDown, LoaderCircle } from "lucide-react";
+import { Sparkles, Github, FileText, Upload, Terminal, GitCommitHorizontal, ShieldAlert, ChevronDown, LoaderCircle, Clipboard } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +23,22 @@ type StreamedFile = {
   additions: number;
   deletions: number;
   patch?: string | null;
+};
+
+type AgentEvent = {
+  step: string;
+  agent: string;
+  status: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+type FileBreakdownItem = {
+  path: string;
+  type: "feat" | "fix" | "refactor" | "chore";
+  additions: number;
+  deletions: number;
+  summary: string;
 };
 
 const LOADING_STEPS = [
@@ -38,57 +53,144 @@ const mockSummary: PRSummary = {
   id: "mock-575",
   repoName: "pocketpaw/pocketpaw",
   prNumber: 575,
-  prTitle: "Add voice and STT support with telegram adapter",
+  prTitle: "Add semantic memory subsystem with vector retrieval",
   author: "pocketpaw",
   date: new Date().toISOString(),
   summary:
-    "This PR adds voice and speech-to-text (STT) capabilities to pocketpaw, integrating a new Telegram adapter for audio message handling. Config changes extend environment variable support for the new tools.",
+    "This PR introduces a semantic memory subsystem that allows pocketpaw to index, retrieve, and manage long-term memory through vector similarity search. It adds a FAISS-backed file store, a dedicated manager layer, dashboard API endpoints, and real-time UI updates via WebSocket events. The implementation includes broad regression and security tests to reduce rollout risk.",
+  structuredSummary: {
+    what: "Introduces a new semantic memory capability for storing and retrieving long-term context.",
+    how: "Implements a FAISS-backed storage engine with Ollama embeddings, wires memory manager services into dashboard APIs, and adds frontend controls with real-time synchronization.",
+    impact: "Improves retrieval quality and transparency for memory-driven responses while increasing confidence through focused regression and security tests.",
+  },
   changes: [
-    { type: "feat", description: "Add voice and STT support to the runtime loop" },
-    { type: "feat", description: "Integrate telegram adapter for audio handling" },
-    { type: "feat", description: "Extend config with new environment variables" },
+    { type: "feat", description: "Introduce file-based vector memory store with FAISS search" },
+    { type: "feat", description: "Add memory manager service and dashboard API integration" },
+    { type: "feat", description: "Implement memory modal UI and real-time WebSocket updates" },
+    { type: "chore", description: "Add comprehensive subsystem, regression, and security tests" },
+  ],
+  whatChanged: [
+    {
+      filename: "src/pocketpaw/memory/file_store.py",
+      type: "feat",
+      additions: 1641,
+      deletions: 9,
+      reliability: 82,
+      what: "Adds the primary semantic memory engine, including vector indexing, embedding orchestration, retrieval filtering, and persistence flows.",
+      keyChanges: [
+        "Introduced FAISS index lifecycle management and persistence routines",
+        "Added Ollama embedding generation and memory chunk normalization",
+        "Implemented retrieval ranking with configurable thresholds",
+      ],
+      diff:
+        "@@ -0,0 +1,28 @@\n+class FileMemoryStore:\n+    def add_entry(self, entry):\n+        vector = self.embedder.embed(entry.text)\n+        self.index.add(vector)\n+        self._persist_metadata(entry)\n+\n+    def search(self, query, top_k=5):\n+        query_vector = self.embedder.embed(query)\n+        distances, indices = self.index.search(query_vector, top_k)\n+        return self._hydrate_results(indices, distances)",
+    },
+    {
+      filename: "src/pocketpaw/memory/manager.py",
+      type: "feat",
+      additions: 92,
+      deletions: 4,
+      reliability: 88,
+      what: "Adds a manager layer that coordinates memory CRUD operations and encapsulates business rules before persisting into the vector store.",
+      keyChanges: [
+        "Introduced service-level validation for memory payloads",
+        "Centralized expiration and retrieval orchestration",
+      ],
+      diff:
+        "@@ -12,7 +12,17 @@ class MemoryManager:\n+    def save_memory(self, payload):\n+        self._validate(payload)\n+        return self.store.add_entry(payload)\n+\n+    def query_memory(self, prompt):\n+        return self.store.search(prompt, top_k=self.config.top_k)",
+    },
+    {
+      filename: "src/pocketpaw/dashboard.py",
+      type: "feat",
+      additions: 55,
+      deletions: 5,
+      reliability: 77,
+      what: "Adds memory API routes for listing, updating, and deleting memory entries and wires the manager to existing dashboard endpoints.",
+      keyChanges: [
+        "Added dashboard endpoints for memory lifecycle operations",
+        "Connected endpoint handlers with memory manager service",
+      ],
+      diff:
+        "@@ -188,6 +188,15 @@\n+@router.get('/memory')\n+def list_memory():\n+    return memory_manager.list_entries()\n+\n+@router.patch('/memory/{id}')\n+def update_memory(id, payload):\n+    return memory_manager.update_entry(id, payload)",
+    },
+    {
+      filename: "src/pocketpaw/frontend/templates/components/modals/memory.html",
+      type: "feat",
+      additions: 147,
+      deletions: 9,
+      reliability: 80,
+      what: "Introduces the memory management modal UI for search, edit, and delete workflows with improved transparency for stored memory.",
+      keyChanges: [
+        "Added modal shell with search and edit controls",
+        "Linked user actions to new memory API endpoints",
+      ],
+      diff:
+        "@@ -0,0 +1,18 @@\n+<section id=\"memory-modal\">\n+  <header>Memory</header>\n+  <input id=\"memory-search\" />\n+  <div id=\"memory-results\"></div>\n+</section>",
+    },
+    {
+      filename: "tests/test_file_memory_fixes.py",
+      type: "chore",
+      additions: 623,
+      deletions: 1,
+      reliability: 92,
+      what: "Adds extensive regression coverage for edge cases including concurrent writes, malformed payloads, and recovery scenarios.",
+      keyChanges: [
+        "Introduced integration-like test matrix for large memory payloads",
+        "Added corruption recovery and partial write rollback assertions",
+      ],
+      diff:
+        "@@ -0,0 +1,16 @@\n+def test_recovers_after_partial_write(tmp_path):\n+    store = FileMemoryStore(tmp_path)\n+    store.add_entry(sample_entry())\n+    corrupt_index_file(tmp_path)\n+    assert store.search('hello') == []",
+    },
   ],
   filesAffected: [
-    { filename: "src/pocketpaw/agents/loop.py", changeType: "feat", additions: 53, deletions: 0, status: "modified" },
-    { filename: "src/pocketpaw/bus/adapters/telegram_adapter.py", changeType: "feat", additions: 57, deletions: 1, status: "modified" },
-    { filename: "src/pocketpaw/config.py", changeType: "feat", additions: 15, deletions: 3, status: "modified" },
-    { filename: "src/pocketpaw/tools/builtin/stt.py", changeType: "feat", additions: 49, deletions: 3, status: "added" },
-    { filename: "src/pocketpaw/tools/builtin/voice.py", changeType: "feat", additions: 31, deletions: 10, status: "added" },
+    { filename: "src/pocketpaw/memory/file_store.py", changeType: "feat", additions: 1641, deletions: 9, status: "added", summary: "Introduces a new file-based vector store for long-term memory. Implements embedding generation via Ollama, FAISS-based similarity search, and persistent storage of memory chunks. This is the core storage engine for the new memory subsystem." },
+    { filename: "src/pocketpaw/memory/manager.py", changeType: "feat", additions: 92, deletions: 4, status: "added", summary: "Adds a MemoryManager class that coordinates the full memory lifecycle — storing, retrieving, and expiring entries. Acts as the service layer between API endpoints and the file store." },
+    { filename: "src/pocketpaw/dashboard.py", changeType: "feat", additions: 55, deletions: 5, status: "modified", summary: "Adds three new REST endpoints for memory management: PATCH for updating entries, and supporting GET/DELETE routes. Wires the memory manager into the existing dashboard FastAPI app." },
+    { filename: "src/pocketpaw/dashboard_ws.py", changeType: "feat", additions: 15, deletions: 0, status: "modified", summary: "Extends the WebSocket handler to broadcast memory update events to connected clients in real time, enabling the dashboard UI to react without polling." },
+    { filename: "src/pocketpaw/config.py", changeType: "feat", additions: 26, deletions: 2, status: "modified", summary: "Adds embedding_base_url configuration field pointing to the Ollama embedding provider, and compaction_recent_window for controlling session history compaction behavior." },
+    { filename: "src/pocketpaw/frontend/templates/components/modals/memory.html", changeType: "feat", additions: 147, deletions: 9, status: "added", summary: "Introduces a new memory management modal in the dashboard UI. Allows users to view, search, edit, and delete long-term memory entries directly from the interface." },
+    { filename: "src/pocketpaw/frontend/js/features/transparency.js", changeType: "feat", additions: 243, deletions: 1, status: "modified", summary: "Large addition implementing the transparency feature — likely showing users what memory entries exist and how they influence responses. Main frontend logic for the memory modal." },
+    { filename: "tests/test_memory.py", changeType: "chore", additions: 286, deletions: 0, status: "added", summary: "Comprehensive test suite for the new memory subsystem covering CRUD operations, similarity search, and edge cases like empty stores and malformed inputs." },
+    { filename: "tests/test_file_memory_fixes.py", changeType: "chore", additions: 623, deletions: 1, status: "added", summary: "Extensive regression and integration tests specifically targeting file-based memory edge cases — large payloads, concurrent writes, and recovery after corruption." },
+    { filename: "tests/test_dashboard_security.py", changeType: "chore", additions: 49, deletions: 0, status: "added", summary: "Adds security-focused tests for the new dashboard endpoints, verifying authentication requirements and input sanitization on memory API routes." },
   ],
   changelog:
-    "## pocketpaw/pocketpaw #575\n### Added\n- Voice and STT tool support\n- Telegram adapter for audio messages\n### Changed\n- Extended config.py with new env vars",
+    "## feat(memory): semantic memory subsystem\n\n### Added\n- FAISS-backed file memory store with embedding pipeline\n- Memory manager service for lifecycle orchestration\n- Dashboard memory endpoints and modal UI\n\n### Changed\n- Dashboard WebSocket stream now emits memory update events\n- Runtime config supports embedding provider and compaction window\n\n### Testing\n- Added regression and security suites for memory endpoints and store recovery",
   checklist: [
-    { id: "1", label: "Verify new env vars are documented in README", checked: false },
-    { id: "2", label: "Test STT integration end to end", checked: false },
-    { id: "3", label: "Confirm telegram adapter handles missing audio gracefully", checked: false },
-    { id: "4", label: "Check voice.py error handling for unsupported formats", checked: false },
-    { id: "5", label: "Validate config.py changes do not break existing deployments", checked: false },
+    { id: "1", label: "Validate memory APIs enforce auth for read/update/delete", checked: false, priority: "critical" },
+    { id: "2", label: "Run regression suite for vector retrieval and persistence", checked: false, priority: "high" },
+    { id: "3", label: "Confirm embedding provider fallback behavior on timeout", checked: false, priority: "high" },
+    { id: "4", label: "Verify dashboard modal handles empty and corrupted state", checked: false, priority: "medium" },
+    { id: "5", label: "Ensure config docs include new memory-related env vars", checked: false, priority: "medium" },
   ],
   rawDiff:
-    "diff --git a/src/pocketpaw/agents/loop.py b/src/pocketpaw/agents/loop.py\nindex 287c245f1..85a6e549f 100644\n--- a/src/pocketpaw/agents/loop.py\n+++ b/src/pocketpaw/agents/loop.py",
+    "diff --git a/src/pocketpaw/memory/file_store.py b/src/pocketpaw/memory/file_store.py\nindex 6fbc4d4..a3d1062 100644\n--- a/src/pocketpaw/memory/file_store.py\n+++ b/src/pocketpaw/memory/file_store.py\n@@ -0,0 +1,18 @@\n+class FileMemoryStore:\n+    def add_entry(self, entry):\n+        vector = self.embedder.embed(entry.text)\n+        self.index.add(vector)\n+        self._persist_metadata(entry)\n+\n+diff --git a/src/pocketpaw/dashboard.py b/src/pocketpaw/dashboard.py\n@@ -188,6 +188,15 @@\n+@router.get('/memory')\n+def list_memory():\n+    return memory_manager.list_entries()",
   pr: {
-    title: "Add voice and STT support with telegram adapter",
+    title: "Add semantic memory subsystem with vector retrieval",
     author: "pocketpaw",
     number: 575,
     repo: "pocketpaw/pocketpaw",
-    branch_from: "feature/voice",
+    branch_from: "feature/memory",
     branch_to: "main",
     status: "open",
     opened: "2 days ago",
     files_changed: 10,
-    additions: 202,
-    deletions: 21,
+    additions: 3177,
+    deletions: 31,
+    description:
+      "Adds a semantic memory engine with vector retrieval and dashboard controls. Includes manager orchestration, API endpoints, and comprehensive tests for regressions and security.",
   },
   risk: {
     level: "medium",
-    reason: "Core config files modified, may affect existing deployments",
+    reason: "High-volume core memory storage changes plus config updates require staged rollout and close monitoring",
   },
   insights: [
-    { type: "warning", text: "config.py modified — env var changes may affect deployment" },
-    { type: "warning", text: "No test files updated despite logic changes in loop.py" },
-    { type: "insight", text: "telegram_adapter.py changes appear backward compatible" },
-    { type: "insight", text: "STT and voice tools follow existing tool interface pattern" },
+    { type: "insight", text: "Memory subsystem isolates retrieval concerns into a dedicated manager and storage engine." },
+    { type: "warning", text: "Large net-new code in file_store.py increases review surface; prioritize retrieval edge cases." },
+    { type: "positive", text: "Regression coverage is extensive, including corruption and concurrency scenarios." },
+    { type: "security", text: "Dashboard memory routes should keep strict auth checks before merge." },
   ],
+  prUrl: "https://github.com/pocketpaw/pocketpaw/pull/575",
 };
 
 export default function Summarize() {
@@ -101,6 +203,7 @@ export default function Summarize() {
   const [progress, setProgress] = useState<string[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [files, setFiles] = useState<StreamedFile[]>([]);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [loadingStepsVisible, setLoadingStepsVisible] = useState(1);
   const [options, setOptions] = useState({
@@ -131,6 +234,7 @@ export default function Summarize() {
       setProgress([]);
       setStreamError(null);
       setFiles([]);
+      setAgentEvents([]);
     }
   }, [location.state]);
 
@@ -162,6 +266,7 @@ export default function Summarize() {
     setResult(null);
     setProgress([]);
     setFiles([]);
+    setAgentEvents([]);
     setStreamError(null);
 
     try {
@@ -174,6 +279,7 @@ export default function Summarize() {
         {
           onStage: (message) => setProgress((current) => [...current, message]),
           onFile: (file) => setFiles((current) => [...current, file]),
+          onAgent: (event) => setAgentEvents((current) => [...current, event]),
           onSummary: (payload) => setResult(applyOutputOptions(payload)),
           onError: (message) => setStreamError(message),
         }
@@ -200,6 +306,7 @@ export default function Summarize() {
     setResult(null);
     setProgress([]);
     setFiles([]);
+    setAgentEvents([]);
     setStreamError(null);
 
     window.setTimeout(() => {
@@ -230,6 +337,39 @@ export default function Summarize() {
   }, [diffInput, githubUrl]);
 
   const estimatedSeconds = Math.max(4, Math.round(estimatedTokens / 180) + Math.ceil(estimatedFiles / 2));
+
+  const fileBreakdownItems = useMemo<FileBreakdownItem[]>(() => {
+    const source = result?.filesAffected ?? [];
+    return source.map((file) => ({
+      path: file.filename,
+      type: file.changeType,
+      additions: file.additions,
+      deletions: file.deletions,
+      summary:
+        file.summary ||
+        `This file was updated in this pull request to support the broader change set around ${result?.prTitle ?? "the requested feature"}. Review its patch carefully for behavior impact and integration compatibility.`,
+    }));
+  }, [result]);
+
+  const copyAllFileSummaries = useCallback(async () => {
+    if (fileBreakdownItems.length === 0) {
+      toast.error("No file summaries available yet");
+      return;
+    }
+
+    const text = fileBreakdownItems
+      .map((item) => {
+        return `### [${item.type}] ${item.path} (+${item.additions} -${item.deletions})\n${item.summary}`;
+      })
+      .join("\n\n");
+
+    await navigator.clipboard.writeText(text);
+    toast.success("Copied all file summaries");
+  }, [fileBreakdownItems]);
+
+  const handleSaveToHistory = useCallback(() => {
+    toast.success("Summary is saved automatically after generation");
+  }, []);
 
   const tokenColor =
     estimatedTokens > 8000
@@ -268,6 +408,13 @@ export default function Summarize() {
                 <TabsTrigger value="upload" className="flex-1 gap-1.5 data-[state=active]:bg-card">
                   <Upload className="h-3.5 w-3.5" /> Upload File
                 </TabsTrigger>
+                <TabsTrigger
+                  value="file-breakdown"
+                  className="flex-1 gap-1.5 data-[state=active]:bg-card"
+                  disabled={!result}
+                >
+                  📄 File Breakdown
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="paste">
@@ -301,6 +448,39 @@ export default function Summarize() {
               <TabsContent value="upload">
                 <div className="relative">
                   <FileDropZone onFile={handleFileUpload} />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="file-breakdown">
+                <div className="rounded-lg border border-[#1e1e1e] bg-[#111111] p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">Per-file markdown summaries</h3>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={copyAllFileSummaries}>
+                      <Clipboard className="h-3.5 w-3.5" /> Copy All Summaries
+                    </Button>
+                  </div>
+                  <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                    {fileBreakdownItems.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Generate a summary first to view file-level breakdowns.</p>
+                    ) : (
+                      fileBreakdownItems.map((item, idx) => (
+                        <div key={`${item.path}-${idx}`} className="rounded-md border border-[#1e1e1e] bg-[#0f0f0f] p-3">
+                          <div className="flex items-start justify-between gap-2 text-xs">
+                            <span className="rounded-full border border-border bg-background px-2 py-0.5 font-mono text-cyan-300">
+                              {item.type}
+                            </span>
+                            <span className="font-mono text-[11px]">
+                              <span className="text-green-400">+{item.additions}</span>{" "}
+                              <span className="text-red-400">-{item.deletions}</span>
+                            </span>
+                          </div>
+                          <p className="mt-2 break-all font-mono text-xs text-foreground">{item.path}</p>
+                          <Separator className="my-2 bg-[#1e1e1e]" />
+                          <p className="text-sm leading-relaxed text-muted-foreground">{item.summary}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
@@ -418,6 +598,42 @@ export default function Summarize() {
                     ))
                   )}
                 </div>
+
+                <div className="space-y-2 border-t border-border pt-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Agent step timeline
+                  </p>
+                  {agentEvents.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Waiting for agent events...</p>
+                  ) : (
+                    <div className="max-h-56 space-y-2 overflow-auto pr-1">
+                      {agentEvents.map((event, index) => (
+                        <div
+                          key={`${event.step}-${event.agent}-${index}`}
+                          className="rounded-md border border-[#1e1e1e] bg-[#0f0f0f] px-3 py-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-cyan-300">{event.step}</span>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide",
+                                event.status === "done"
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                  : event.status === "error"
+                                    ? "border-red-500/40 bg-red-500/10 text-red-300"
+                                    : "border-yellow-500/40 bg-yellow-500/10 text-yellow-300"
+                              )}
+                            >
+                              {event.status}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-muted-foreground">{event.message}</p>
+                          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{event.agent}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -462,7 +678,13 @@ export default function Summarize() {
               </div>
             )}
 
-            {result && !loading && <SummaryOutput summary={result} onResummarize={handleSummarize} />}
+            {result && !loading && (
+              <SummaryOutput
+                summary={result}
+                onResummarize={handleSummarize}
+                onSaveToHistory={handleSaveToHistory}
+              />
+            )}
 
             {!result && !loading && (
               <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border py-24 text-center">

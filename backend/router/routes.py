@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -13,7 +14,7 @@ from schemas import GoogleAuthRequest, PRSummaryRequest
 from services.auth import authenticate_google_user, get_user_from_token
 from services.fetch_pr import fetch_pr_public
 from services.save_pr import save_pr_to_mongo
-from services.summarize_pr import generate_pr_summary
+from services.summarize_pr import generate_pr_summary_with_trace
 
 router = APIRouter()
 
@@ -44,6 +45,9 @@ def _history_document_to_response(document: dict[str, Any]) -> dict[str, Any]:
         "changelog": document.get("changelog", ""),
         "checklist": document.get("checklist", []),
         "rawDiff": document.get("rawDiff", ""),
+        "risk": document.get("risk"),
+        "insights": document.get("insights", []),
+        "pr": document.get("pr"),
     }
 
 
@@ -131,8 +135,26 @@ async def summarize_pr_stream(
                     "raw_diff": payload.diff_text,
                 }
 
-            yield {"event": "stage", "data": json.dumps({"message": "Running LangChain analysis", "status": "running"})}
-            summary = await run_in_threadpool(generate_pr_summary, pr_data)
+            yield {"event": "stage", "data": json.dumps({"message": "Running LangGraph multi-agent pipeline", "status": "running"})}
+
+            loop = asyncio.get_running_loop()
+            agent_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+            def on_agent_event(event: dict[str, Any]):
+                loop.call_soon_threadsafe(agent_event_queue.put_nowait, event)
+
+            summary_task = asyncio.create_task(
+                asyncio.to_thread(generate_pr_summary_with_trace, pr_data, on_agent_event)
+            )
+
+            while not summary_task.done() or not agent_event_queue.empty():
+                try:
+                    event = await asyncio.wait_for(agent_event_queue.get(), timeout=0.2)
+                    yield {"event": "agent", "data": json.dumps(event)}
+                except asyncio.TimeoutError:
+                    pass
+
+            summary = await summary_task
 
             record = {
                 "user_id": user["id"],
@@ -147,6 +169,21 @@ async def summarize_pr_stream(
                 "changelog": summary["changelog"],
                 "checklist": summary["checklist"],
                 "rawDiff": pr_data.get("raw_diff", ""),
+                "risk": summary.get("risk"),
+                "insights": summary.get("insights", []),
+                "pr": {
+                    "title": pr_data.get("title", "Uploaded diff"),
+                    "author": pr_data.get("author") or user["name"],
+                    "number": int(pr_data.get("pr_number") or 0),
+                    "repo": pr_data.get("repo", "manual/diff"),
+                    "branch_from": pr_data.get("head_branch") or "unknown",
+                    "branch_to": pr_data.get("base_branch") or "main",
+                    "status": pr_data.get("state") or "open",
+                    "opened": "recently",
+                    "files_changed": len(summary.get("filesAffected", [])),
+                    "additions": sum(item.get("additions", 0) for item in summary.get("filesAffected", [])),
+                    "deletions": sum(item.get("deletions", 0) for item in summary.get("filesAffected", [])),
+                },
                 "repo": pr_data.get("repo", "manual/diff"),
                 "pr_number": pr_data.get("pr_number", 0),
                 "title": pr_data.get("title", "Uploaded diff"),

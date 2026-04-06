@@ -66,6 +66,7 @@ export type SummaryStreamPayload = {
 export type SummaryStreamEventHandlers = {
   onStage?: (message: string) => void;
   onFile?: (file: { filename: string; status: string; additions: number; deletions: number; patch?: string | null }) => void;
+  onAgent?: (event: { step: string; agent: string; status: string; message: string; details?: Record<string, unknown> }) => void;
   onSummary?: (summary: PRSummary) => void;
   onError?: (message: string) => void;
 };
@@ -136,6 +137,9 @@ export async function streamSummary(
         }
         if (parsed.eventName === "file") {
           handlers.onFile?.(payloadData);
+        }
+        if (parsed.eventName === "agent") {
+          handlers.onAgent?.(payloadData);
         }
         if (parsed.eventName === "summary") {
           summary = payloadData as PRSummary;

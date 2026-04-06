@@ -100,6 +100,31 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
+  @keyframes card-fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .card-enter {
+    animation: card-fade-in-up 0.42s ease-out both;
+  }
+
+  .card-elevated {
+    box-shadow: 0 12px 38px -20px rgb(0 0 0 / 0.8), 0 2px 8px rgb(0 0 0 / 0.45);
+    transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  }
+
+  .card-elevated:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 16px 45px -24px rgb(0 0 0 / 0.85), 0 4px 16px rgb(0 0 0 / 0.45);
+  }
+
   .glow-accent {
     box-shadow: 0 0 20px hsl(var(--glow) / 0.15), 0 0 60px hsl(var(--glow) / 0.05);
   }

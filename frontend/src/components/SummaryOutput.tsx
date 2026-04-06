@@ -1,39 +1,200 @@
-import { PRSummary, RiskLevel } from "@/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChangeTypeBadge } from "@/components/ChangeTypeBadge";
-import { CopyButton } from "@/components/CopyButton";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useEffect, useMemo, useState } from "react";
+import { formatDistanceToNowStrict } from "date-fns";
 import {
+  Clipboard,
   FileCode,
-  ListChecks,
+  FileDown,
   FileText,
   GitCommit,
-  BookOpen,
-  GitBranch,
-  ArrowRight,
-  TriangleAlert,
-  Lightbulb,
-  CircleDot,
-  Clipboard,
-  FileDown,
   Save,
   RefreshCcw,
+  CircleDot,
 } from "lucide-react";
-import { useState } from "react";
+
+import { PRSummary, WhatChangedItem, ChecklistItem as ChecklistItemType, StructuredSummary } from "@/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ChangeTypeBadge } from "@/components/ChangeTypeBadge";
+import { CopyButton } from "@/components/CopyButton";
+import { StructuredSummaryCard } from "@/components/StructuredSummary";
+import { FileSummaryCard } from "@/components/FileSummaryCard";
+import { InsightItem } from "@/components/InsightItem";
+import { ChecklistItem } from "@/components/ChecklistItem";
+import { DiffViewer } from "@/components/DiffViewer";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const riskStyle: Record<RiskLevel, string> = {
-  low: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.25)]",
-  medium: "border-yellow-500/40 bg-yellow-500/10 text-yellow-300 shadow-[0_0_16px_rgba(234,179,8,0.25)]",
-  high: "border-red-500/40 bg-red-500/10 text-red-300 shadow-[0_0_16px_rgba(239,68,68,0.25)]",
-};
+function isSecurityTitle(title: string) {
+  return /(owasp|cve|security|auth|vulnerability|bypass)/i.test(title);
+}
 
-function buildMarkdown(summary: PRSummary) {
+function normalizeSummaryText(summary: PRSummary) {
+  const generic = /this pr updates|targeted improvements|changing\s+\d+\s+files/i.test(summary.summary);
+  if (!generic) {
+    return summary.summary;
+  }
+
+  const fromFiles = (summary.whatChanged ?? [])
+    .slice(0, 2)
+    .map((item) => item.what)
+    .join(" ");
+
+  if (fromFiles) {
+    return fromFiles;
+  }
+
+  const firstChange = summary.changes[0]?.description ?? "introduces targeted improvements";
+  return `This change set ${firstChange.toLowerCase()} with focused updates across critical paths and supporting tests.`;
+}
+
+function buildStructuredSummary(summary: PRSummary): StructuredSummary {
+  if (summary.structuredSummary) {
+    return summary.structuredSummary;
+  }
+
+  const normalized = normalizeSummaryText(summary);
+  const sentences = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const what = sentences[0] ?? "Introduces focused changes to improve behavior in key runtime paths.";
+  const how =
+    sentences[1] ??
+    (sentences.slice(1, 3).join(" ") ||
+      "Implements the fix through targeted updates in core files and supporting tests.");
+  const impact =
+    sentences.slice(2).join(" ") ||
+    "Reduces operational risk while preserving compatibility for existing integrations and workflows.";
+
+  return { what, how, impact };
+}
+
+function inferChecklistPriority(label: string): "critical" | "high" | "medium" {
+  const lowered = label.toLowerCase();
+  if (/(auth|security|owasp|cve|critical|rate-limit|middleware)/.test(lowered)) {
+    return "critical";
+  }
+  if (/(test|verify|retry|header|endpoint|load)/.test(lowered)) {
+    return "high";
+  }
+  return "medium";
+}
+
+function computeReliability(item: WhatChangedItem, allItems: WhatChangedItem[], prTitle: string) {
+  if (typeof item.reliability === "number") {
+    return Math.max(0, Math.min(100, item.reliability));
+  }
+
+  let score = 0;
+  const totalLines = item.additions + item.deletions;
+  const deletionRatio = item.deletions / Math.max(1, totalLines);
+  const itemName = item.filename.toLowerCase();
+  const baseName = itemName.split("/").pop()?.replace(/\.[a-z0-9]+$/, "") ?? itemName;
+  const hasTestFile = allItems.some((entry) => {
+    const name = entry.filename.toLowerCase();
+    return (
+      name.includes("test") &&
+      (name.includes(baseName) || !itemName.includes("test"))
+    );
+  });
+  const isCriticalFile = /(auth|security|config|infra|migration|cve|owasp)/i.test(item.filename);
+  const clearCommitMessage = prTitle.trim().length > 16;
+
+  if (hasTestFile) {
+    score += 30;
+  }
+  if (totalLines < 50) {
+    score += 20;
+  }
+  if (!isCriticalFile) {
+    score += 20;
+  }
+  if (clearCommitMessage) {
+    score += 15;
+  }
+  if (deletionRatio <= 0.8) {
+    score += 15;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function normalizeWhatChanged(summary: PRSummary): WhatChangedItem[] {
+  if (summary.whatChanged && summary.whatChanged.length > 0) {
+    return summary.whatChanged.map((item) => ({
+      ...item,
+      reliability: computeReliability(item, summary.whatChanged ?? [], summary.prTitle),
+    }));
+  }
+
+  return summary.filesAffected.map((file, index) => {
+    const matchingChange = summary.changes[index]?.description ?? `Updated ${file.filename} to support the PR objective.`;
+    const item: WhatChangedItem = {
+      filename: file.filename,
+      type: file.changeType,
+      additions: file.additions,
+      deletions: file.deletions,
+      reliability: 0,
+      what: file.summary || matchingChange,
+      keyChanges: [
+        `Updated ${file.filename.split("/").pop()} implementation flow`,
+        `Net code delta: +${file.additions} / -${file.deletions}`,
+      ],
+      diff: file.patch || "",
+    };
+    item.reliability = computeReliability(item, [item], summary.prTitle);
+    return item;
+  });
+}
+
+function normalizeInsights(summary: PRSummary) {
+  const raw = summary.insights ?? [];
+  const sanitized = raw
+    .map((item) => {
+      const text = item.text;
+      if (/failed|error|traceback|exception/i.test(text)) {
+        return {
+          type: "warning" as const,
+          text: "Manual review recommended for this PR.",
+        };
+      }
+      return item;
+    })
+    .filter((item, index, all) => all.findIndex((entry) => entry.text === item.text && entry.type === item.type) === index);
+
+  if (sanitized.length === 0) {
+    return [{ type: "warning" as const, text: "Manual review recommended for this PR." }];
+  }
+
+  if (isSecurityTitle(summary.prTitle) && !sanitized.some((item) => item.type === "security")) {
+    sanitized.unshift({
+      type: "security",
+      text: "Auth or security-sensitive logic changed. Security team review is recommended before merge.",
+    });
+  }
+
+  return sanitized;
+}
+
+function normalizeChecklist(summary: PRSummary): ChecklistItemType[] {
+  const fromSummary = summary.checklist.length > 0 ? summary.checklist : [
+    { id: "1", label: "Review changed file behavior against expected runtime flow", checked: false },
+    { id: "2", label: "Run targeted tests for impacted modules and endpoints", checked: false },
+    { id: "3", label: "Validate no breaking API contract changes were introduced", checked: false },
+  ];
+
+  return fromSummary.map((item) => ({
+    ...item,
+    priority: item.priority ?? inferChecklistPriority(item.label),
+  }));
+}
+
+function buildMarkdown(summary: PRSummary, structured: StructuredSummary, whatChanged: WhatChangedItem[]) {
   const lines = [
     `# ${summary.prTitle}`,
     "",
@@ -42,13 +203,12 @@ function buildMarkdown(summary: PRSummary) {
     `- Author: ${summary.author ?? "unknown"}`,
     "",
     "## Summary",
-    summary.summary,
+    `- WHAT: ${structured.what}`,
+    `- HOW: ${structured.how}`,
+    `- IMPACT: ${structured.impact}`,
     "",
     "## What Changed",
-    ...summary.changes.map((change) => `- [${change.type}] ${change.description}`),
-    "",
-    "## Files Affected",
-    ...summary.filesAffected.map((file) => `- ${file.filename} (+${file.additions} / -${file.deletions})`),
+    ...whatChanged.map((item) => `- [${item.type}] ${item.filename}: ${item.what}`),
     "",
     "## Changelog",
     summary.changelog,
@@ -61,6 +221,34 @@ function buildMarkdown(summary: PRSummary) {
   return lines.join("\n");
 }
 
+function renderOpenedTime(summary: PRSummary) {
+  try {
+    return formatDistanceToNowStrict(new Date(summary.date), { addSuffix: true });
+  } catch {
+    return summary.pr?.opened ?? "recently";
+  }
+}
+
+function reliabilityDot(score: number) {
+  if (score > 85) {
+    return "bg-emerald-400";
+  }
+  if (score >= 65) {
+    return "bg-yellow-400";
+  }
+  return "bg-red-400";
+}
+
+function priorityWeight(priority?: "critical" | "high" | "medium") {
+  if (priority === "critical") {
+    return 0;
+  }
+  if (priority === "high") {
+    return 1;
+  }
+  return 2;
+}
+
 export function SummaryOutput({
   summary,
   onResummarize,
@@ -70,25 +258,27 @@ export function SummaryOutput({
   onResummarize?: () => void;
   onSaveToHistory?: () => void;
 }) {
-  const [checklist, setChecklist] = useState(summary.checklist);
+  const [checklistState, setChecklistState] = useState(() => normalizeChecklist(summary));
 
-  const risk =
-    summary.risk ??
-    (() => {
-      const changed = summary.filesAffected.map((f) => f.filename.toLowerCase());
-      if (changed.some((name) => name.includes("config") || name.includes("env"))) {
-        return { level: "medium" as const, reason: "core config files modified" };
-      }
-      if (changed.every((name) => name.includes("readme") || name.includes("docs"))) {
-        return { level: "low" as const, reason: "only docs were updated" };
-      }
-      return { level: "low" as const, reason: "changes are localized and low blast-radius" };
-    })();
+  useEffect(() => {
+    setChecklistState(normalizeChecklist(summary));
+  }, [summary]);
 
-  const totalFiles = summary.filesAffected.length;
-  const totalAdditions = summary.filesAffected.reduce((acc, file) => acc + file.additions, 0);
-  const totalDeletions = summary.filesAffected.reduce((acc, file) => acc + file.deletions, 0);
-  const prMeta = summary.pr ?? {
+  const structured = useMemo(() => buildStructuredSummary(summary), [summary]);
+  const whatChanged = useMemo(() => normalizeWhatChanged(summary), [summary]);
+  const insights = useMemo(() => normalizeInsights(summary), [summary]);
+
+  const risk = summary.risk ?? {
+    level: isSecurityTitle(summary.prTitle) ? "high" : "medium",
+    reason: isSecurityTitle(summary.prTitle)
+      ? "Security-critical files modified — manual review strongly recommended"
+      : "Core modules changed — verify behavior under production-like load",
+  };
+
+  const totalAdditions = whatChanged.reduce((acc, item) => acc + item.additions, 0);
+  const totalDeletions = whatChanged.reduce((acc, item) => acc + item.deletions, 0);
+
+  const metadata = summary.pr ?? {
     title: summary.prTitle,
     author: summary.author ?? "unknown",
     number: summary.prNumber,
@@ -96,50 +286,47 @@ export function SummaryOutput({
     branch_from: "feature/unknown",
     branch_to: "main",
     status: "open" as const,
-    opened: "recently",
-    files_changed: totalFiles,
+    opened: renderOpenedTime(summary),
+    files_changed: whatChanged.length,
     additions: totalAdditions,
     deletions: totalDeletions,
+    description: "No PR description available.",
   };
 
-  const insights =
-    summary.insights ??
-    [
-      {
-        type: "insight" as const,
-        text: `${totalFiles} files were analyzed and classified into change types`,
-      },
-      {
-        type: "warning" as const,
-        text: "No explicit test impact data was found; review test coverage manually",
-      },
-    ];
-
-  const changeTotals = summary.filesAffected.reduce(
-    (acc, file) => {
-      acc[file.changeType] += 1;
+  const breakdown = whatChanged.reduce(
+    (acc, item) => {
+      acc[item.type] += 1;
       return acc;
     },
     { feat: 0, fix: 0, refactor: 0, chore: 0 }
   );
+  const totalForBreakdown = Math.max(1, whatChanged.length);
 
-  const totalChanges = Math.max(1, summary.filesAffected.length);
-  const checklistDone = checklist.filter((item) => item.checked).length;
-  const checklistPercent = Math.round((checklistDone / Math.max(1, checklist.length)) * 100);
+  const sortedChecklist = [...checklistState].sort((a, b) => {
+    if (a.checked !== b.checked) {
+      return a.checked ? 1 : -1;
+    }
+    return priorityWeight(a.priority) - priorityWeight(b.priority);
+  });
+
+  const completed = checklistState.filter((item) => item.checked).length;
+  const checklistPercent = Math.round((completed / Math.max(1, checklistState.length)) * 100);
+  const allChecklistDone = checklistState.length > 0 && completed === checklistState.length;
 
   const toggleCheck = (id: string) => {
-    setChecklist((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item))
+    setChecklistState((current) =>
+      current.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item))
     );
   };
 
   const copyFullSummary = async () => {
-    await navigator.clipboard.writeText(buildMarkdown(summary));
-    toast.success("Full summary copied");
+    const markdown = buildMarkdown(summary, structured, whatChanged);
+    await navigator.clipboard.writeText(markdown);
+    toast.success("Copied! ✓");
   };
 
   const exportMarkdown = () => {
-    const markdown = buildMarkdown(summary);
+    const markdown = buildMarkdown(summary, structured, whatChanged);
     const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -152,248 +339,255 @@ export function SummaryOutput({
     toast.success("Markdown exported");
   };
 
+  const diffFiles = whatChanged
+    .filter((item) => Boolean(item.diff))
+    .map((item) => ({ filename: item.filename, diff: item.diff ?? "" }));
+
   return (
-    <div className="space-y-4 pb-24">
-      <Card className="animate-fade-in border-border bg-card">
+    <div className="space-y-6 pb-24">
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "0ms" }}>
         <CardContent className="space-y-3 p-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">{prMeta.title}</h3>
-              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                <Avatar className="h-4 w-4 border border-border">
-                  <AvatarFallback className="bg-background text-[9px] text-muted-foreground">
-                    {(prMeta.author[0] || "U").toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span>@{prMeta.author}</span>
-              </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold tracking-wide text-foreground">{metadata.title}</h3>
+              <p className="text-xs text-muted-foreground">@{metadata.author}</p>
+              <p className="line-clamp-2 text-xs text-muted-foreground">
+                {(metadata.description ?? "").slice(0, 100)}
+              </p>
             </div>
-            <Badge
-              variant="outline"
-              className={
-                prMeta.status === "open"
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                  : prMeta.status === "merged"
-                    ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
-                    : "border-red-500/40 bg-red-500/10 text-red-300"
-              }
-            >
-              <CircleDot className="mr-1 h-3 w-3" />
-              {prMeta.status[0].toUpperCase() + prMeta.status.slice(1)}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {isSecurityTitle(metadata.title) && (
+                <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-300">
+                  🔒 Security Fix
+                </Badge>
+              )}
+              <Badge
+                variant="outline"
+                className={
+                  metadata.status === "open"
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                    : metadata.status === "merged"
+                      ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                      : "border-red-500/40 bg-red-500/10 text-red-300"
+                }
+              >
+                <CircleDot className="mr-1 h-3 w-3" />
+                {metadata.status[0].toUpperCase() + metadata.status.slice(1)}
+              </Badge>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
-            <span>{prMeta.branch_from}</span>
-            <ArrowRight className="h-3.5 w-3.5 text-primary" />
-            <span>{prMeta.branch_to}</span>
+          <div className="rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
+            {metadata.branch_from} <span className="mx-1 text-cyan-300">-&gt;</span> {metadata.branch_to}
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>#{prMeta.number}</span>
-            <span>{prMeta.files_changed} files changed</span>
-            <span className="font-mono text-feat">+{prMeta.additions}</span>
-            <span className="font-mono text-fix">-{prMeta.deletions}</span>
-            <span>opened {prMeta.opened}</span>
+            <span>#{metadata.number}</span>
+            <span>{metadata.files_changed} files changed</span>
+            <span className="font-mono text-green-400">+{metadata.additions}</span>
+            <span className="font-mono text-red-400">-{metadata.deletions}</span>
+            <span>{renderOpenedTime(summary)}</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Summary */}
-      <Card className="animate-fade-in border-border bg-card">
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Summary</CardTitle>
-          </div>
-          <Badge variant="outline" className={riskStyle[risk.level]}>
-            <CircleDot className="mr-1 h-3 w-3" />
-            {risk.level[0].toUpperCase() + risk.level.slice(1)} Risk
-          </Badge>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm leading-relaxed text-foreground">{summary.summary}</p>
-          <p className="mt-3 text-xs text-muted-foreground">Reason: {risk.reason}</p>
-        </CardContent>
-      </Card>
+      <StructuredSummaryCard
+        summary={structured}
+        riskLevel={risk.level}
+        riskReason={risk.reason}
+        animationDelay={50}
+      />
 
-      {/* What Changed */}
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.1s" }}>
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "100ms" }}>
         <CardHeader className="flex flex-row items-center gap-2 pb-3">
           <GitCommit className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">What Changed</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
-            {summary.changes.map((change, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <ChangeTypeBadge type={change.type} />
-                <span className="text-foreground">{change.description}</span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.15s" }}>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Change Type Breakdown</CardTitle>
+          <CardTitle className="text-base tracking-wide">What Changed</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="h-3 overflow-hidden rounded-full border border-border bg-background">
-            <div className="flex h-full w-full">
-              <div className="bg-feat" style={{ width: `${(changeTotals.feat / totalChanges) * 100}%` }} />
-              <div className="bg-fix" style={{ width: `${(changeTotals.fix / totalChanges) * 100}%` }} />
-              <div className="bg-refactor" style={{ width: `${(changeTotals.refactor / totalChanges) * 100}%` }} />
-              <div className="bg-chore" style={{ width: `${(changeTotals.chore / totalChanges) * 100}%` }} />
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-            <span>feat {changeTotals.feat} ({Math.round((changeTotals.feat / totalChanges) * 100)}%)</span>
-            <span>fix {changeTotals.fix} ({Math.round((changeTotals.fix / totalChanges) * 100)}%)</span>
-            <span>refactor {changeTotals.refactor} ({Math.round((changeTotals.refactor / totalChanges) * 100)}%)</span>
-            <span>chore {changeTotals.chore} ({Math.round((changeTotals.chore / totalChanges) * 100)}%)</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Files Affected */}
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.2s" }}>
-        <CardHeader className="flex flex-row items-center gap-2 pb-3">
-          <FileCode className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Files Affected</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-1.5">
-            {summary.filesAffected.map((file, i) => (
-              <li key={i} className="flex items-center gap-2 text-sm">
-                <ChangeTypeBadge type={file.changeType} />
-                <code className="font-mono text-xs text-foreground">{file.filename}</code>
-                <span className="ml-auto font-mono text-xs text-feat">+{file.additions}</span>
-                <span className="font-mono text-xs text-fix">-{file.deletions}</span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.24s" }}>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">AI Insights & Warnings</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {insights.map((item, index) => (
-            <div
-              key={`${item.type}-${index}`}
-              className={`rounded-md border-l-2 px-3 py-2 text-sm ${
-                item.type === "warning"
-                  ? "border-yellow-400 bg-yellow-500/10 text-yellow-200"
-                  : "border-cyan-400 bg-cyan-500/10 text-cyan-100"
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                {item.type === "warning" ? (
-                  <TriangleAlert className="mt-0.5 h-4 w-4" />
-                ) : (
-                  <Lightbulb className="mt-0.5 h-4 w-4" />
-                )}
-                <span>{item.text}</span>
-              </div>
-            </div>
+          {whatChanged.map((item, index) => (
+            <FileSummaryCard key={`${item.filename}-${index}`} item={item} animationDelay={index * 50} />
           ))}
         </CardContent>
       </Card>
 
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.27s" }}>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <div className="flex items-center gap-2">
-            <ListChecks className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Review Checklist</CardTitle>
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "150ms" }}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base tracking-wide">Change Type Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="h-3 overflow-hidden rounded-full border border-border bg-background">
+            <div className="flex h-full w-full">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="bg-gradient-to-r from-emerald-500/90 to-emerald-300/80"
+                    style={{ width: `${(breakdown.feat / totalForBreakdown) * 100}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>feat: {breakdown.feat} ({Math.round((breakdown.feat / totalForBreakdown) * 100)}%)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="bg-gradient-to-r from-red-500/90 to-red-300/80"
+                    style={{ width: `${(breakdown.fix / totalForBreakdown) * 100}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>fix: {breakdown.fix} ({Math.round((breakdown.fix / totalForBreakdown) * 100)}%)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="bg-gradient-to-r from-blue-500/90 to-blue-300/80"
+                    style={{ width: `${(breakdown.refactor / totalForBreakdown) * 100}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>refactor: {breakdown.refactor} ({Math.round((breakdown.refactor / totalForBreakdown) * 100)}%)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="bg-gradient-to-r from-yellow-500/90 to-yellow-300/80"
+                    style={{ width: `${(breakdown.chore / totalForBreakdown) * 100}%` }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>chore: {breakdown.chore} ({Math.round((breakdown.chore / totalForBreakdown) * 100)}%)</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span>feat {breakdown.feat} ({Math.round((breakdown.feat / totalForBreakdown) * 100)}%)</span>
+            <span>fix {breakdown.fix} ({Math.round((breakdown.fix / totalForBreakdown) * 100)}%)</span>
+            <span>refactor {breakdown.refactor} ({Math.round((breakdown.refactor / totalForBreakdown) * 100)}%)</span>
+            <span>chore {breakdown.chore} ({Math.round((breakdown.chore / totalForBreakdown) * 100)}%)</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "200ms" }}>
+        <CardHeader className="flex flex-row items-center gap-2 pb-3">
+          <FileCode className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base tracking-wide">Files Affected</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2">
+            {whatChanged.map((item) => {
+              const score = item.reliability ?? 0;
+              return (
+                <li
+                  key={item.filename}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors hover:border-[#2a2a2a]"
+                  onClick={() => {
+                    document.getElementById(`file-card-${encodeURIComponent(item.filename)}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                >
+                  <ChangeTypeBadge type={item.type} />
+                  <span className="font-mono text-xs text-foreground">{item.filename}</span>
+                  <span className="ml-auto font-mono text-xs">
+                    <span className="text-green-400">+{item.additions}</span>{" "}
+                    <span className="text-red-400">-{item.deletions}</span>
+                  </span>
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span className={cn("h-2 w-2 rounded-full", reliabilityDot(score))} />
+                    {score}%
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "250ms" }}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base tracking-wide">AI Insights & Warnings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          {insights.map((item, index) => (
+            <InsightItem key={`${item.type}-${index}`} insight={item} />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "300ms" }}>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base tracking-wide">Review Checklist</CardTitle>
           <span className="text-xs text-muted-foreground">
-            {checklistDone}/{checklist.length} completed
+            {completed}/{checklistState.length} completed
           </span>
         </CardHeader>
         <CardContent className="space-y-3">
           <Progress value={checklistPercent} className="h-2 bg-secondary" />
+          {allChecklistDone && (
+            <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+              All done! ✓
+            </p>
+          )}
           <ul className="space-y-2.5">
-            {checklist.map((item) => (
-              <li key={item.id} className="flex items-center gap-2">
-                <Checkbox
-                  checked={item.checked}
-                  onCheckedChange={() => toggleCheck(item.id)}
-                  id={item.id}
-                  className="data-[state=checked]:border-green-500 data-[state=checked]:bg-green-500"
-                />
-                <label
-                  htmlFor={item.id}
-                  className={`cursor-pointer text-sm ${item.checked ? "text-muted-foreground line-through" : "text-foreground"}`}
-                >
-                  {item.label}
-                </label>
-              </li>
+            {sortedChecklist.map((item) => (
+              <ChecklistItem key={item.id} item={item} onToggle={toggleCheck} />
             ))}
           </ul>
         </CardContent>
       </Card>
 
-      {/* Changelog */}
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.3s" }}>
+      <Card className="card-elevated card-enter border-border bg-card" style={{ animationDelay: "350ms" }}>
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Changelog Entry</CardTitle>
+            <CardTitle className="text-base tracking-wide">Changelog Entry</CardTitle>
           </div>
           <CopyButton text={summary.changelog} label="Copy" />
         </CardHeader>
-        <CardContent>
-          <pre className="overflow-x-auto rounded-md bg-surface p-4 font-mono text-xs leading-relaxed text-foreground">
-            {summary.changelog}
+        <CardContent className="space-y-3">
+          <pre className="overflow-x-auto rounded-md border border-border bg-background p-4 font-mono text-xs leading-relaxed">
+            {summary.changelog.split("\n").map((line, index) => (
+              <div
+                key={`${line}-${index}`}
+                className={cn(
+                  line.startsWith("##") && "text-cyan-300",
+                  line.startsWith("###") && "text-emerald-300",
+                  line.startsWith("-") && "text-muted-foreground"
+                )}
+              >
+                {line || " "}
+              </div>
+            ))}
           </pre>
+          <p className="text-xs text-muted-foreground">Uses conventional commits style sections for release readiness.</p>
         </CardContent>
       </Card>
 
-      {/* Raw Diff */}
-      <Card className="animate-fade-in border-border bg-card" style={{ animationDelay: "0.35s" }}>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <div className="flex items-center gap-2">
-            <GitBranch className="h-4 w-4 text-primary" />
-            <CardTitle className="text-base">Git Diff</CardTitle>
-          </div>
-          <CopyButton text={summary.rawDiff ?? ""} label="Copy Diff" />
-        </CardHeader>
-        <CardContent>
-          <pre className="max-h-[420px] overflow-auto rounded-md bg-surface p-4 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-            {summary.rawDiff || "No diff payload was returned for this summary."}
-          </pre>
-        </CardContent>
-      </Card>
+      <DiffViewer
+        files={diffFiles.length > 0 ? diffFiles : [{ filename: whatChanged[0]?.filename ?? "pull-request.diff", diff: summary.rawDiff ?? "" }]}
+        prUrl={summary.prUrl}
+        animationDelay={400}
+      />
 
-      {/* Review Checklist */}
-      <div className="sticky bottom-0 z-20 animate-fade-in rounded-md border border-border bg-card/95 p-3 backdrop-blur" style={{ animationDelay: "0.5s" }}>
+      <div className="sticky bottom-0 z-20 card-enter rounded-md border border-border bg-card/95 p-3 backdrop-blur" style={{ animationDelay: "450ms" }}>
         <Separator className="mb-3 bg-border" />
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Button variant="outline" size="sm" className="gap-2" onClick={copyFullSummary}>
+          <Button variant="outline" size="sm" className="gap-2 active:scale-95 transition-transform" onClick={copyFullSummary}>
             <Clipboard className="h-3.5 w-3.5" /> Copy Full Summary
           </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={exportMarkdown}>
+          <Button variant="outline" size="sm" className="gap-2 active:scale-95 transition-transform" onClick={exportMarkdown}>
             <FileDown className="h-3.5 w-3.5" /> Export as Markdown
           </Button>
           <Button
             variant="outline"
             size="sm"
-            className="gap-2"
+            className="gap-2 active:scale-95 transition-transform"
             onClick={() => {
               if (onSaveToHistory) {
                 onSaveToHistory();
-              } else {
-                toast.success("Summary already persisted in history");
+                return;
               }
+              toast.success("Summary is already saved to history");
             }}
           >
             <Save className="h-3.5 w-3.5" /> Save to History
           </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={onResummarize}>
+          <Button variant="outline" size="sm" className="gap-2 active:scale-95 transition-transform" onClick={onResummarize}>
             <RefreshCcw className="h-3.5 w-3.5" /> Re-summarize
           </Button>
         </div>
