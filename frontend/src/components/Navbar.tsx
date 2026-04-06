@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { GitPullRequest, LogOut, Moon, Sun, UserCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/hooks/use-store";
@@ -17,6 +17,7 @@ const navItems = [
 export function Navbar() {
   const { settings, user } = useAppStore();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const toggleTheme = () => {
     const next = settings.theme === "dark" ? "light" : "dark";
@@ -75,6 +76,7 @@ export function Navbar() {
                   const response = await loginWithGoogle(credential);
                   setAuth(response.user, credential);
                   toast.success(`Signed in as ${response.user.name}`);
+                  navigate("/summarize");
                 } catch (error) {
                   toast.error(error instanceof Error ? error.message : "Failed to sign in");
                 }
