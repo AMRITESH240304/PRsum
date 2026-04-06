@@ -1,11 +1,19 @@
 import { AuthUser, PRSummary } from "@/types";
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const API_BASE_URL = (configuredApiBaseUrl
-  ? configuredApiBaseUrl
-  : import.meta.env.PROD
-    ? ""
-    : "http://localhost:8000"
+const normalizedConfiguredApiBaseUrl = configuredApiBaseUrl?.replace(/\/+$/, "") ?? "";
+const shouldUseSecureProxy =
+  import.meta.env.PROD &&
+  typeof window !== "undefined" &&
+  window.location.protocol === "https:" &&
+  normalizedConfiguredApiBaseUrl.startsWith("http://");
+const API_BASE_URL = (shouldUseSecureProxy
+  ? ""
+  : normalizedConfiguredApiBaseUrl
+    ? normalizedConfiguredApiBaseUrl
+    : import.meta.env.PROD
+      ? ""
+      : "http://localhost:8000"
 ).replace(/\/+$/, "");
 
 function apiUrl(path: string) {
